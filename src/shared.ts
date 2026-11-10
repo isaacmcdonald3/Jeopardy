@@ -44,4 +44,5 @@ export interface ClientToServerEvents {
 export interface ServerToClientEvents {
   "game:state": (state: GameSnapshot) => void;
   "game:error": (message: string) => void;
+  "game:removed": () => void;
 }

@@ -7,14 +7,20 @@ A live, shared Jeopardy game for a host and players on their own devices. The ho
 1. Install Node.js 20 or newer.
 2. From this folder, run `npm install`.
 3. Run `npm run dev`.
-4. Open the Vite URL shown in the terminal (usually `http://localhost:5173`) and choose **Host a game**.
+4. Open the Vite URL shown in the terminal (usually `http://localhost:5173`) and choose **Host a game**. Do not open `index.html` with VS Code Live Server: Live Server does not compile the React/TypeScript source or start the multiplayer server.
 5. Share the room code or **Copy player link** with everyone. For friends on the same Wi-Fi, share your computer's local-network address with port `5173` instead of `localhost`.
 
 The host and player devices must be able to reach the computer running the app. The development server keeps room state in memory, so rooms end when the server stops.
 
-## Production
+## Deploy to Render
 
-Run `npm run build`, then `npm start`. The production server listens on port `3001` by default; set the `PORT` environment variable to use another port.
+This project includes a [`render.yaml`](./render.yaml) Blueprint for a free **Web Service**. Push the project to a GitHub repository, then in Render choose **New → Blueprint**, select that repository, and deploy. The Blueprint installs dependencies, builds the frontend, starts the app, and checks `/healthz`. You can also create a Web Service manually with build command `npm ci && npm run build` and start command `npm start`.
+
+Use a Web Service, not a Static Site: the app needs a Node server and Socket.IO WebSocket connections for multiplayer. Render supplies the port through `PORT`, and the server serves the built frontend and game from the same origin.
+
+Render's free service may spin down after inactivity. This app keeps rooms and scores in server memory, so stopping or restarting the service ends every active game. Start a fresh room after the service wakes up. Use the same deployed URL for the host and all players.
+
+For local production testing, run `npm run build`, then `npm start`. The server listens on port `3001` by default.
 
 ## Game controls
 

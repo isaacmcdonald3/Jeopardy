@@ -25,8 +25,14 @@ const rooms = new Map<string, Room>();
 const port = Number(process.env.PORT ?? 3001);
 const distPath = join(process.cwd(), "dist");
 
+app.get("/healthz", (_request, response) => {
+  response.status(200).json({ status: "ok" });
+});
+
 function getRoomForSocket(socketId: string): Room | undefined {
-  return [...rooms.values()].find((room) => room.hostSocketId === socketId || room.playerSockets.has(socketId));
+  return [...rooms.values()].find(
+    (room) => room.hostSocketId === socketId || [...room.playerSockets.values()].includes(socketId),
+  );
 }
 
 function sendSnapshots(room: Room): void {
@@ -139,6 +145,7 @@ io.on("connection", (socket) => {
     if (!room || room.hostSocketId !== socket.id || !room.players.has(playerId)) return;
     const playerSocketId = room.playerSockets.get(playerId);
     if (playerSocketId) {
+      io.to(playerSocketId).emit("game:removed");
       io.sockets.sockets.get(playerSocketId)?.leave(room.code);
       room.playerSockets.delete(playerId);
     }

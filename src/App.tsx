@@ -46,35 +46,64 @@ export default function App() {
       setScreen(state.isHost ? "host" : "player");
       setJoined(true);
       setRoomCode(state.roomCode);
-      setSelectedPlayerId((current) => current || state.players[0]?.id || "");
+      setSelectedPlayerId((current) =>
+        state.players.some((player) => player.id === current) ? current : state.players[0]?.id ?? "",
+      );
     };
     const onError = (message: string) => setNotice(message);
+    const onRemoved = () => {
+      sessionStorage.removeItem("jeopardy-player-room");
+      sessionStorage.removeItem("jeopardy-player-name");
+      setSnapshot(null);
+      setJoined(false);
+      setScreen("home");
+      setNotice("The host removed you from the game.");
+    };
 
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
     socket.on("game:state", onState);
     socket.on("game:error", onError);
+    socket.on("game:removed", onRemoved);
     socket.connect();
     return () => {
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
       socket.off("game:state", onState);
       socket.off("game:error", onError);
+      socket.off("game:removed", onRemoved);
       socket.disconnect();
     };
   }, []);
 
   useEffect(() => {
     if (screen !== "home" || !socket.connected) return;
-    const hostCode = localStorage.getItem("jeopardy-host-room");
-    const hostKey = localStorage.getItem("jeopardy-host-key");
+    const hostCode = sessionStorage.getItem("jeopardy-host-room");
+    const hostKey = sessionStorage.getItem("jeopardy-host-key");
     if (hostCode && hostKey) {
       socket.emit("room:join", { roomCode: hostCode, role: "host", key: hostKey }, (result) => {
         if (!result.ok) {
-          localStorage.removeItem("jeopardy-host-room");
-          localStorage.removeItem("jeopardy-host-key");
+          sessionStorage.removeItem("jeopardy-host-room");
+          sessionStorage.removeItem("jeopardy-host-key");
+          setError(result.error);
         }
       });
+      return;
+    }
+    const playerCode = sessionStorage.getItem("jeopardy-player-room");
+    const playerName = sessionStorage.getItem("jeopardy-player-name");
+    if (playerCode && playerName) {
+      socket.emit(
+        "room:join",
+        { roomCode: playerCode, role: "player", playerId: getPlayerId(), name: playerName },
+        (result) => {
+          if (!result.ok) {
+            sessionStorage.removeItem("jeopardy-player-room");
+            sessionStorage.removeItem("jeopardy-player-name");
+            setNotice(result.error);
+          }
+        },
+      );
     }
   }, [screen, connected]);
 
@@ -99,8 +128,8 @@ export default function App() {
           setError(created.ok ? "The host room could not be created." : created.error);
           return;
         }
-        localStorage.setItem("jeopardy-host-room", created.roomCode);
-        localStorage.setItem("jeopardy-host-key", created.hostKey);
+        sessionStorage.setItem("jeopardy-host-room", created.roomCode);
+        sessionStorage.setItem("jeopardy-host-key", created.hostKey);
         socket.emit("room:join", { roomCode: created.roomCode, role: "host", key: created.hostKey }, (joinedRoom) => {
           if (!joinedRoom.ok) setError(joinedRoom.error);
         });
@@ -112,7 +141,12 @@ export default function App() {
       "room:join",
       { roomCode, role: "player", playerId, name },
       (result: RoomReply) => {
-        if (!result.ok) setError(result.error);
+        if (!result.ok) {
+          setError(result.error);
+          return;
+        }
+        sessionStorage.setItem("jeopardy-player-room", roomCode);
+        sessionStorage.setItem("jeopardy-player-name", name.trim());
       },
     );
   }
@@ -182,9 +216,12 @@ export default function App() {
             <section className="panel players-panel">
               <div className="panel-heading"><div><p className="eyebrow">THE CONTESTANTS</p><h2>Players <span className="count-badge">{players.length}</span></h2></div><span className="live-caption"><span className="live-dot" /> LIVE SCORES</span></div>
               <div className="players-list">
-                {players.map((player, index) => <button className={`player-row ${selectedPlayerId === player.id ? "player-row-selected" : ""}`} key={player.id} onClick={() => setSelectedPlayerId(player.id)}>
-                  <span className="rank">{String(index + 1).padStart(2, "0")}</span><span className="avatar">{player.name.slice(0, 1).toUpperCase()}</span><span className="player-name-wrap"><strong>{player.name}</strong><small><span className={`connection-dot ${player.connected ? "is-connected" : ""}`} />{player.connected ? "In the game" : "Disconnected"}</small></span><strong className="score">{formatScore(player.score)}</strong><span className="remove-wrap" onClick={(event) => event.stopPropagation()}><button className="remove-player" aria-label={`Remove ${player.name}`} title={`Remove ${player.name}`} onClick={() => { if (window.confirm(`Remove ${player.name} from the game?`)) socket.emit("host:remove-player", player.id); }}>×</button></span>
-                </button>)}
+                {players.map((player, index) => <div className={`player-row ${selectedPlayerId === player.id ? "player-row-selected" : ""}`} key={player.id}>
+                  <button className="player-select" onClick={() => setSelectedPlayerId(player.id)} aria-label={`Adjust ${player.name}'s score`}>
+                    <span className="rank">{String(index + 1).padStart(2, "0")}</span><span className="avatar">{player.name.slice(0, 1).toUpperCase()}</span><span className="player-name-wrap"><strong>{player.name}</strong><small><span className={`connection-dot ${player.connected ? "is-connected" : ""}`} />{player.connected ? "In the game" : "Disconnected"}</small></span><strong className="score">{formatScore(player.score)}</strong>
+                  </button>
+                  <button className="remove-player" aria-label={`Remove ${player.name}`} title={`Remove ${player.name}`} onClick={() => { if (window.confirm(`Remove ${player.name} from the game?`)) socket.emit("host:remove-player", player.id); }}>×</button>
+                </div>)}
                 {!players.length && <div className="empty-players"><span>♧</span><strong>Your podium is ready</strong><small>Share the room code so your players can join.</small></div>}
               </div>
               {players.length > 0 && <ScoreControls customPoints={customPoints} setCustomPoints={setCustomPoints} selectedPlayer={players.find((player) => player.id === selectedPlayerId)} onScore={sendScore} />}
@@ -239,6 +276,7 @@ export default function App() {
       </form>
       <div className="entry-card host-entry"><div className="card-icon host-icon">✦</div><p className="eyebrow">RUNNING THE SHOW?</p><h2>Host a game</h2><p className="card-copy">Create a room, share the code, and take your place at the podium.</p><div className="host-features"><span><i>✓</i> Live buzzer &amp; scorekeeping</span><span><i>✓</i> Private Final Jeopardy wagers</span><span><i>✓</i> Everyone joins on their own device</span></div><button className="button button-outline full-button" onClick={() => enterRoom("host")}>Create a host room <span>→</span></button></div>
     </section>
+    {notice && <div className="notice" role="status">{notice}<button onClick={() => setNotice("")}>Dismiss</button></div>}
     {error && <div className="error-message" role="alert">{error}</div>}
     <footer className="landing-footer"><span>MADE FOR GAME NIGHT</span><span>THE ANSWER IS... <b>GOOD TIMES.</b></span></footer>
   </main>;
