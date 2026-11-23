@@ -8,6 +8,8 @@ export interface Player {
 export interface FinalWager {
   amount: number;
   correct: boolean | null;
+  answer?: string;
+  submitted?: boolean;
 }
 
 export interface GameSnapshot {
@@ -16,6 +18,7 @@ export interface GameSnapshot {
   buzzOrder: string[];
   players: Player[];
   finalJeopardy: boolean;
+  finalJeopardyClosed?: boolean;
   wagers: Record<string, FinalWager>;
   isHost: boolean;
   playerId: string | null;
@@ -36,7 +39,9 @@ export interface ClientToServerEvents {
   "host:buzzer": (action: "open" | "close" | "clear") => void;
   "player:buzz": () => void;
   "host:final-jeopardy": (enabled: boolean) => void;
+  "host:close-final-jeopardy": () => void;
   "player:lock-wager": (amount: number) => void;
+  "player:submit-answer": (details: { answer: string; submitted: boolean }) => void;
   "host:resolve-wager": (details: { playerId: string; correct: boolean }) => void;
   "host:times-up": () => void;
 }

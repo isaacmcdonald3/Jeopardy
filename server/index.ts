@@ -15,6 +15,7 @@ interface Room {
   buzzerOpen: boolean;
   buzzOrder: string[];
   finalJeopardy: boolean;
+  finalJeopardyClosed: boolean;
   wagers: Map<string, FinalWager>;
 }
 
@@ -43,6 +44,7 @@ function sendSnapshots(room: Room): void {
     buzzOrder: [...room.buzzOrder],
     players,
     finalJeopardy: room.finalJeopardy,
+    finalJeopardyClosed: room.finalJeopardyClosed,
   };
 
   if (room.hostSocketId) {
@@ -87,6 +89,7 @@ io.on("connection", (socket) => {
       buzzerOpen: false,
       buzzOrder: [],
       finalJeopardy: false,
+      finalJeopardyClosed: false,
       wagers: new Map(),
     };
     rooms.set(code, room);
@@ -185,10 +188,23 @@ io.on("connection", (socket) => {
     const room = getRoomForSocket(socket.id);
     if (!room || room.hostSocketId !== socket.id) return;
     room.finalJeopardy = enabled;
+    room.finalJeopardyClosed = false;
     room.buzzerOpen = false;
     if (enabled) {
       room.buzzOrder = [];
       room.wagers.clear();
+    }
+    sendSnapshots(room);
+  });
+
+  socket.on("host:close-final-jeopardy", () => {
+    const room = getRoomForSocket(socket.id);
+    if (!room || room.hostSocketId !== socket.id || !room.finalJeopardy) return;
+    room.finalJeopardyClosed = true;
+    for (const wager of room.wagers.values()) {
+      if (!wager.submitted) {
+        wager.submitted = true;
+      }
     }
     sendSnapshots(room);
   });
@@ -202,7 +218,18 @@ io.on("connection", (socket) => {
       if (playerId && room.wagers.has(playerId)) sendError(socket.id, "Your wager is already locked in.");
       return;
     }
-    room.wagers.set(playerId, { amount, correct: null });
+    room.wagers.set(playerId, { amount, correct: null, answer: "", submitted: false });
+    sendSnapshots(room);
+  });
+
+  socket.on("player:submit-answer", ({ answer, submitted }) => {
+    const room = getRoomForSocket(socket.id);
+    if (!room || room.hostSocketId === socket.id || !room.finalJeopardy || room.finalJeopardyClosed) return;
+    const playerId = [...room.playerSockets].find(([, socketId]) => socketId === socket.id)?.[0];
+    const wager = playerId ? room.wagers.get(playerId) : undefined;
+    if (!playerId || !wager) return;
+    wager.answer = answer.trim();
+    wager.submitted = submitted;
     sendSnapshots(room);
   });
 

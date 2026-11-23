@@ -32,6 +32,7 @@ export default function App() {
   const [selectedPlayerId, setSelectedPlayerId] = useState("");
   const [customPoints, setCustomPoints] = useState("");
   const [wagerInput, setWagerInput] = useState("");
+  const [finalAnswerInput, setFinalAnswerInput] = useState("");
   const soundRef = useRef<HTMLAudioElement>(null);
 
   useEffect(() => {
@@ -49,6 +50,9 @@ export default function App() {
       setSelectedPlayerId((current) =>
         state.players.some((player) => player.id === current) ? current : state.players[0]?.id ?? "",
       );
+      if (state.playerId && state.wagers[state.playerId]) {
+        setFinalAnswerInput(state.wagers[state.playerId].answer ?? "");
+      }
     };
     const onError = (message: string) => setNotice(message);
     const onRemoved = () => {
@@ -197,19 +201,28 @@ export default function App() {
             {snapshot.finalJeopardy && (
               <section className="panel final-panel">
                 <div className="panel-heading"><div><p className="eyebrow">FINAL ROUND</p><h2>Final Jeopardy</h2></div><span className="status-pill status-final"><span /> IN PROGRESS</span></div>
-                <p className="panel-copy">Wagers are private until the host. Review each locked wager and score the response.</p>
+                <p className="panel-copy">Wagers and answers are private until submitted or closed. Review each locked wager and score the response.</p>
                 <div className="final-table">
                   {players.map((player) => {
                     const wager = snapshot.wagers[player.id];
                     return <div className="final-row" key={player.id}>
                       <div className="final-player"><span className="avatar">{player.name.slice(0, 1).toUpperCase()}</span><div><strong>{player.name}</strong><small>{formatScore(player.score)}</small></div></div>
-                      <div className="wager-cell">{wager ? <><strong>{formatScore(wager.amount)}</strong><small>{wager.correct === null ? "Locked in" : wager.correct ? "Correct" : "Incorrect"}</small></> : <span className="waiting-wager">Waiting for wager</span>}</div>
+                      <div className="wager-cell">
+                        {wager ? <>
+                          <strong>{formatScore(wager.amount)}</strong>
+                          <small>{wager.correct === null ? (wager.submitted ? "Submitted answer" : "Locked in") : wager.correct ? "Correct" : "Incorrect"}</small>
+                          {wager.answer && <div className="player-answer-display">Answer: <em>{wager.answer}</em></div>}
+                        </> : <span className="waiting-wager">Waiting for wager</span>}
+                      </div>
                       {wager && wager.correct === null ? <div className="result-actions"><button className="button button-green button-small" onClick={() => socket.emit("host:resolve-wager", { playerId: player.id, correct: true })}>Correct</button><button className="button button-red button-small" onClick={() => socket.emit("host:resolve-wager", { playerId: player.id, correct: false })}>Incorrect</button></div> : <div className="result-actions result-placeholder">{wager ? "Scored" : "—"}</div>}
                     </div>;
                   })}
                   {!players.length && <div className="no-players">Players will appear here when they join.</div>}
                 </div>
-                <button className="button button-outline final-end" onClick={() => socket.emit("host:final-jeopardy", false)}>End Final Jeopardy</button>
+                <div className="control-row">
+                  {!snapshot.finalJeopardyClosed && <button className="button button-gold" onClick={() => socket.emit("host:close-final-jeopardy")}>Close Final Jeopardy</button>}
+                  <button className="button button-outline final-end" onClick={() => socket.emit("host:final-jeopardy", false)}>End Final Jeopardy</button>
+                </div>
               </section>
             )}
 
@@ -250,7 +263,59 @@ export default function App() {
             <div className="panel-heading"><div><p className="eyebrow">THE FINAL ROUND</p><h2>Final Jeopardy</h2></div><span className="status-pill status-final"><span /> IN PROGRESS</span></div>
             <p className="panel-copy">Everyone’s scores are on the board. Choose your wager privately; only you and the host can see it.</p>
             <div className="scoreboard">{players.map((player) => <div className={`scoreboard-item ${player.id === snapshot.playerId ? "scoreboard-mine" : ""}`} key={player.id}><span>{player.name}{player.id === snapshot.playerId && <small> YOU</small>}</span><strong>{formatScore(player.score)}</strong></div>)}</div>
-            <div className="wager-box">{isLocked ? <><div className="locked-icon">✓</div><p className="eyebrow">WAGER LOCKED</p><div className="locked-amount">{formatScore(snapshot.wagers[snapshot.playerId!].amount)}</div><p className="panel-copy">Your wager is locked in. Good luck!</p></> : <><label className="eyebrow" htmlFor="wager">YOUR PRIVATE WAGER</label><div className="wager-input-wrap"><span>$</span><input id="wager" type="number" min="0" max={Math.max(0, ownPlayer?.score ?? 0)} step="1" value={wagerInput} onChange={(event) => setWagerInput(event.target.value)} placeholder="Enter your wager" /><button className="button button-gold" disabled={!wagerInput || !Number.isSafeInteger(Number(wagerInput)) || Number(wagerInput) < 0 || Number(wagerInput) > Math.max(0, ownPlayer?.score ?? 0)} onClick={() => socket.emit("player:lock-wager", Number(wagerInput))}>Lock wager</button></div><small className="wager-limit">Wager up to {formatScore(Math.max(0, ownPlayer?.score ?? 0))}</small></>}</div>
+            <div className="wager-box">
+              {isLocked ? (
+                <div className="locked-wager-section">
+                  <div className="locked-icon">✓</div>
+                  <p className="eyebrow">WAGER LOCKED</p>
+                  <div className="locked-amount">{formatScore(snapshot.wagers[snapshot.playerId!].amount)}</div>
+                  <div className="answer-section">
+                    <label className="eyebrow" htmlFor="final-answer">YOUR FINAL ANSWER</label>
+                    <input
+                      id="final-answer"
+                      type="text"
+                      className="room-input"
+                      value={finalAnswerInput}
+                      onChange={(e) => setFinalAnswerInput(e.target.value)}
+                      disabled={snapshot.wagers[snapshot.playerId!].submitted || snapshot.finalJeopardyClosed}
+                      placeholder="Type your answer here"
+                      autoComplete="off"
+                    />
+                    {snapshot.wagers[snapshot.playerId!].submitted ? (
+                      <div className="submitted-answer-status">
+                        <p className="panel-copy"><strong>Answer submitted!</strong></p>
+                        {!snapshot.finalJeopardyClosed && (
+                          <button
+                            className="button button-outline"
+                            onClick={() => socket.emit("player:submit-answer", { answer: finalAnswerInput, submitted: false })}
+                          >
+                            Edit / Un-submit
+                          </button>
+                        )}
+                        {snapshot.finalJeopardyClosed && <p className="panel-copy"><small>Final Jeopardy submissions are closed by the host.</small></p>}
+                      </div>
+                    ) : (
+                      <button
+                        className="button button-gold full-button"
+                        onClick={() => socket.emit("player:submit-answer", { answer: finalAnswerInput, submitted: true })}
+                      >
+                        Submit answer
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <label className="eyebrow" htmlFor="wager">YOUR PRIVATE WAGER</label>
+                  <div className="wager-input-wrap">
+                    <span>$</span>
+                    <input id="wager" type="number" min="0" max={Math.max(0, ownPlayer?.score ?? 0)} step="1" value={wagerInput} onChange={(event) => setWagerInput(event.target.value)} placeholder="Enter your wager" />
+                    <button className="button button-gold" disabled={!wagerInput || !Number.isSafeInteger(Number(wagerInput)) || Number(wagerInput) < 0 || Number(wagerInput) > Math.max(0, ownPlayer?.score ?? 0)} onClick={() => socket.emit("player:lock-wager", Number(wagerInput))}>Lock wager</button>
+                  </div>
+                  <small className="wager-limit">Wager up to {formatScore(Math.max(0, ownPlayer?.score ?? 0))}</small>
+                </>
+              )}
+            </div>
           </section>
         ) : (
           <section className="player-buzzer-area">
