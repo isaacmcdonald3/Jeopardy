@@ -34,6 +34,7 @@ export default function App() {
   const [wagerInput, setWagerInput] = useState("");
   const [finalAnswerInput, setFinalAnswerInput] = useState("");
   const soundRef = useRef<HTMLAudioElement>(null);
+  const themeRef = useRef<HTMLAudioElement>(null);
 
   useEffect(() => {
     const onConnect = () => setConnected(true);
@@ -173,10 +174,22 @@ export default function App() {
     }
   }
 
+  async function playThemeSong() {
+    const audio = themeRef.current;
+    if (!audio) return;
+    audio.currentTime = 0;
+    try {
+      await audio.play();
+    } catch {
+      setNotice("The theme song could not be played. Check your device audio settings.");
+    }
+  }
+
   if (joined && snapshot) {
     return screen === "host" ? (
       <main className="game-shell host-shell">
         <audio ref={soundRef} src="/sounds/times-up.m4a" preload="auto" />
+        <audio ref={themeRef} src="/sounds/jeopardy-theme.m4a" preload="auto" />
         <GameTopbar roomCode={snapshot.roomCode} role="HOST" />
         {notice && <div className="notice" role="status">{notice}<button onClick={() => setNotice("")}>Dismiss</button></div>}
         <div className="host-layout">
@@ -221,6 +234,7 @@ export default function App() {
                 </div>
                 <div className="control-row">
                   {!snapshot.finalJeopardyClosed && <button className="button button-gold" onClick={() => socket.emit("host:close-final-jeopardy")}>Close Final Jeopardy</button>}
+                  <button className="button button-outline" onClick={playThemeSong}>Jeopardy Theme Song</button>
                   <button className="button button-outline final-end" onClick={() => socket.emit("host:final-jeopardy", false)}>End Final Jeopardy</button>
                 </div>
               </section>
